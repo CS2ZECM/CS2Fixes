@@ -2,25 +2,27 @@ name: CI
 
 on:
   push:
-    branches:
-      - main
-    paths-ignore:
-    - LICENSE
-    - README.md
-    - 'configs**'
-    - '**.sln'
-    - '**.vcxproj**'
-  pull_request:
-    paths-ignore:
-    - LICENSE
-    - README.md
-    - 'configs**'
-    - '**.sln'
-    - '**.vcxproj**'
-
+    tags:
+      - "v*.*.*"
 jobs:
+  once:
+      name: Create GitHub release
+      runs-on: ubuntu-latest
+      outputs:
+        upload_url: ${{ steps.create_release.outputs.upload_url }}
+      steps:
+        - name: Create a release
+          id: create_release
+          uses: actions/create-release@v1
+          env:
+            GITHUB_TOKEN: ${{ secrets.SECRET_TOKEN }}
+          with:
+            tag_name: ${{ github.ref }}
+            release_name: Release ${{ github.ref }}
+            prerelease: false
   build:
     name: Build
+    needs: once
     runs-on: ${{ matrix.os }}
     env:
         HL2SDKCS2: ${{ github.workspace }}/CS2Fixes/sdk
@@ -65,4 +67,23 @@ jobs:
           mkdir build && cd build
           python ../configure.py --enable-optimize --symbol-files --sdks cs2
           ambuild
+          if [ "$RUNNER_OS" == "Linux" ]; then
+            zip -r release.zip package/*
+            mkdir /root/release/
+            mkdir /root/release/ubuntu-latest
+            cp -r release.zip /root/release/ubuntu-latest/
+          elif [ "$RUNNER_OS" == "Windows" ]; then
+            tar -a -c -f release.zip package/*
+            XCOPY /f /r /i /d /y release.zip /root/release/windows-latest/*
+          fi
+      - name: Upload Release Asset
+        id: upload-release-asset 
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.SECRET_TOKEN }}
+        with:
+          upload_url:  ${{ needs.once.outputs.upload_url }} # This pulls from the CREATE RELEASE step above, referencing it's ID to get its outputs object, which include a `upload_url`. See this blog post for more info: https://jasonet.co/posts/new-features-of-github-actions/#passing-data-to-future-steps 
+          asset_path: /root/release//${{ matrix.os }}/release.zip
+          asset_name: CS2Fixes-${{ matrix.os }}.zip
+          asset_content_type: application/zip
   
